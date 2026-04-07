@@ -1,0 +1,9 @@
+# STM32CubeIDE Build Folders
+Debug/
+Release/
+build/
+
+# IDE specific hidden files/folders (Optional, but keeps things clean)
+.metadata/
+.settings/
+*.launch
