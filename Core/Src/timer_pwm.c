@@ -8,63 +8,100 @@
 
 #include "timer_pwm.h"
 
+// --- THE VINYL RECORD (Sine Wave Lookup Table) ---
+// 256 points. Center is 420 (50% Duty Cycle). Amplitude is 200.
+// This means the duty cycle will smoothly swing between 220 and 620.
+static const uint16_t Sine_LUT[256] = {
+    420, 424, 429, 434, 439, 444, 449, 454, 459, 464, 468, 473, 478, 482, 487, 492,
+    496, 501, 505, 509, 514, 518, 522, 526, 530, 534, 538, 542, 546, 549, 553, 556,
+    559, 563, 566, 569, 572, 575, 578, 580, 583, 585, 588, 590, 592, 594, 596, 598,
+    600, 601, 603, 604, 606, 607, 608, 609, 610, 611, 612, 613, 614, 614, 615, 615,
+    615, 615, 615, 614, 614, 613, 612, 611, 610, 609, 608, 607, 606, 604, 603, 601,
+    600, 598, 596, 594, 592, 590, 588, 585, 583, 580, 578, 575, 572, 569, 566, 563,
+    559, 556, 553, 549, 546, 542, 538, 534, 530, 526, 522, 518, 514, 509, 505, 501,
+    496, 492, 487, 482, 478, 473, 468, 464, 459, 454, 449, 444, 439, 434, 429, 424,
+    420, 415, 410, 405, 400, 395, 390, 385, 380, 375, 371, 366, 361, 357, 352, 347,
+    343, 338, 334, 330, 325, 321, 317, 313, 309, 305, 301, 297, 293, 290, 286, 283,
+    280, 276, 273, 270, 267, 264, 261, 259, 256, 254, 251, 249, 247, 245, 243, 241,
+    239, 238, 236, 235, 233, 232, 231, 230, 229, 228, 227, 226, 225, 225, 224, 224,
+    224, 224, 224, 225, 225, 226, 227, 228, 229, 230, 231, 232, 233, 235, 236, 238,
+    239, 241, 243, 245, 247, 249, 251, 254, 256, 259, 261, 264, 267, 270, 273, 276,
+    280, 283, 286, 290, 293, 297, 301, 305, 309, 313, 317, 321, 325, 330, 334, 338,
+    343, 347, 352, 357, 361, 366, 371, 375, 380, 385, 390, 395, 400, 405, 410, 415
+};
+
+// DDS Variables
+volatile uint32_t phase_accumulator = 0;
+volatile uint32_t tuning_word = 0;
+volatile uint8_t  spwm_active = 0;
+
 void MOSFET_Timer1_Init(void) {
-    // 1. Enable Clocks for GPIOA and Timer 1
-    RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN;        // Enable GPIOA clock (1 << 0)
-    RCC->APB2ENR |= RCC_APB2ENR_TIM1EN;         // Enable TIM1 clock (84 MHz bus) (1 << 0)
+    RCC->APB2ENR |= RCC_APB2ENR_TIM1EN;
+    RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN;
 
-    // 2. Configure PA8 for Alternate Function (Timer 1 Channel 1)
-    GPIOA->MODER &= ~GPIO_MODER_MODER8;         // Clear bits 17:16
-    GPIOA->MODER |= GPIO_MODER_MODER8_1;        // Set Alternate Function mode (2 << 16)
+    GPIOA->MODER &= ~GPIO_MODER_MODER8;
+    GPIOA->MODER |= GPIO_MODER_MODER8_1;
+    GPIOA->AFR[1] &= ~GPIO_AFRH_AFSEL8;
+    GPIOA->AFR[1] |= (1 << 0);
 
-    // Set PA8 to High Speed to keep the square wave edges crisp
-    GPIOA->OSPEEDR |= GPIO_OSPEEDER_OSPEEDR8;   // Set High Speed (3 << 16)
+    // PWM Base Frequency: 100 kHz (84MHz / 840)
+    TIM1->PSC = 0;
+    TIM1->ARR = 840 - 1;
 
-    // Select AF1 (TIM1_CH1) for pin PA8
-    GPIOA->AFR[1] &= ~GPIO_AFRH_AFSEL8;         // Clear AF bits for PA8
-    GPIOA->AFR[1] |= (1 << 0);                  // Set AF1 (1 << 0)
-
-    // 3. Configure Timer 1 for 100 Hz PWM
-    // The timer clock is 84 MHz.
-    // Target Frequency = 84,000,000 / ((Prescaler + 1) * (AutoReload + 1))
-    TIM1->PSC = 839;                            // Divides 84MHz down to 100,000 Hz ticks
-    TIM1->ARR = 999;                            // Counts to 1000 ticks = 100 Hz wave
-
-    // 4. Set Duty Cycle to 50%
-    TIM1->CCR1 = 500;                           // 500 is exactly half of 1000
-
-    // --- THE SNIPER TRIGGER (FIXED) ---
-	TIM1->CCR2 = 250;                           // Set trigger exactly at tick 250
-	TIM1->CCMR1 &= ~TIM_CCMR1_OC2M;             // Clear Channel 2 mode bits (bits 14:12)
-	TIM1->CCMR1 |= (7 << 12);                   // Set Channel 2 to PWM Mode 2 (111) to create a Rising Edge
-
-	// --- ADD THIS LINE: Un-mute the Channel 2 hardware event ---
-	TIM1->CCER |= TIM_CCER_CC2E;
-
-	// 5. Configure PWM Mode 1 on Channel 1
-    TIM1->CCMR1 &= ~TIM_CCMR1_CC1S;             // Set channel as output
-    TIM1->CCMR1 &= ~TIM_CCMR1_OC1M;             // Clear output compare mode bits
-    TIM1->CCMR1 |= (6 << 4);                    // Set PWM Mode 1 (110 in bits 6:4)
-    TIM1->CCMR1 |= TIM_CCMR1_OC1PE;             // Enable Preload register
-
-    // 6. Enable the Output on Channel 1
-    TIM1->CCER |= TIM_CCER_CC1E;                // Enable Capture/Compare 1 output
-
-    // 7. Advanced Timer Safety: Main Output Enable (MOE)
-    // TIM1 is an "Advanced" timer, so it requires this extra safety bit to output anything.
+    TIM1->CCMR1 |= TIM_CCMR1_OC1M_1 | TIM_CCMR1_OC1M_2;
+    TIM1->CCMR1 |= TIM_CCMR1_OC1PE;
+    TIM1->CCER |= TIM_CCER_CC1E;
     TIM1->BDTR |= TIM_BDTR_MOE;
+
+    // --- NEW: ENABLE TIM1 UPDATE INTERRUPT ---
+    TIM1->DIER |= TIM_DIER_UIE; // Update Interrupt Enable
+    NVIC_EnableIRQ(TIM1_UP_TIM10_IRQn);
+    NVIC_SetPriority(TIM1_UP_TIM10_IRQn, 1); // High priority!
 }
 
-void MOSFET_Timer1_Start(void) {
-    TIM1->CR1 |= TIM_CR1_CEN;                   // Counter Enable
-}
+// --- THE DDS ENGINE (Runs 100,000 times per second!) ---
+void TIM1_UP_TIM10_IRQHandler(void) {
+    if (TIM1->SR & TIM_SR_UIF) {
+        TIM1->SR &= ~TIM_SR_UIF; // Clear flag
 
-void MOSFET_Timer1_Stop(void) {
-    TIM1->CR1 &= ~TIM_CR1_CEN;                  // Counter Disable
-    TIM1->CNT = 0;                              // Reset counter to 0 for the next test
-    GPIOA->BSRR = GPIO_BSRR_BR8;                // Force PA8 completely LOW (0V) for safety
+        if (spwm_active) {
+            // 1. Advance the needle
+            phase_accumulator += tuning_word;
+
+            // 2. Look up the sine wave value based on the top 8 bits (0-255 index)
+            uint8_t index = phase_accumulator >> 24;
+
+            // 3. Immediately update the MOSFET duty cycle
+            TIM1->CCR1 = Sine_LUT[index];
+        }
+    }
 }
 
 void MOSFET_Timer1_SetDutyCycle(uint16_t duty) {
-    TIM1->CCR1 = duty;  // Update the Compare register to change the ON time
+    TIM1->CCR1 = duty;
+}
+
+void MOSFET_Timer1_Start(void) {
+    TIM1->CR1 |= TIM_CR1_CEN;
+}
+
+void MOSFET_Timer1_Stop(void) {
+    TIM1->CR1 &= ~TIM_CR1_CEN;
+    TIM1->CCR1 = 0; // Force OFF
+}
+
+// --- NEW: START A SPECIFIC SINE WAVE FREQUENCY ---
+void SPWM_Start_Frequency(float target_hz) {
+    // Formula: Tuning Word = (Target_Freq * 2^32) / PWM_Freq
+    // PWM_Freq is exactly 100,000 Hz.
+    tuning_word = (uint32_t)((target_hz * 4294967296.0f) / 100000.0f);
+
+    phase_accumulator = 0; // Reset wave to 0 degrees
+    spwm_active = 1;
+    MOSFET_Timer1_Start();
+}
+
+void SPWM_Stop(void) {
+    spwm_active = 0;
+    MOSFET_Timer1_Stop();
 }

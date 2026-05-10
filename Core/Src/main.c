@@ -91,6 +91,13 @@ void SysTick_Handler(void) {
 
 int main(void) {
     SystemClock_Config_84MHz();
+
+    // --- NEW: INITIALIZE THE BLUE LED (PC13) ---
+	RCC->AHB1ENR |= RCC_AHB1ENR_GPIOCEN;
+	GPIOC->MODER &= ~GPIO_MODER_MODER13;
+	GPIOC->MODER |= GPIO_MODER_MODER13_0;
+	// ------------------------------------------
+
     SysTick_Init();
     MOSFET_Timer1_Init();
     ADC_DMA_Init();
@@ -122,47 +129,77 @@ int main(void) {
                 break;
 
             case STATE_NYQUIST:
-                if (nyquist_view == 0) {
-                    // --- PAGE 1: THE GRAPH ---
-                    OLED_ClearBuffer();
+				if (nyquist_view == 0) {
+					OLED_ClearBuffer();
+					OLED_SetCursor(0, 0);
+					OLED_PrintString("DSP Sim Running");
+					OLED_UpdateScreen();
 
-                    // Draw Axes
-                    OLED_DrawLine(10, 0, 10, 53);   // Y-Axis
-                    OLED_DrawLine(10, 53, 127, 53); // X-Axis
+					// --- SOFTWARE-IN-THE-LOOP DSP SIMULATION ---
+					#define NUM_SAMPLES 512
+					float v_samples[NUM_SAMPLES];
+					float i_samples[NUM_SAMPLES];
 
-                    // Draw X-Axis Ticks (Scale: 2 pixels = 1 mOhm)
-                    OLED_DrawLine(50, 51, 50, 55); // 20 mOhm mark (10 + 20*2)
-                    OLED_DrawLine(90, 51, 90, 55); // 40 mOhm mark (10 + 40*2)
+					float sim_freq = 1000.0f; // 1 kHz test
+					float sample_rate = 50000.0f; // DMA sampling at 50 kHz
 
-                    // Draw Math Simulation (Rs=25, Rct=15)
-                    float x_val, y_val;
-                    for (float t = 3.14159f; t >= 0; t -= 0.05f) {
-                        x_val = 65.0f - (15.0f * cos(t)); // Center=65, Rad=15
-                        y_val = 15.0f * sin(t);
-                        OLED_DrawPixel(10 + (uint8_t)x_val, 53 - (uint8_t)y_val);
-                    }
-                    for (float w = 0; w < 22.0f; w += 1.0f) {
-                        OLED_DrawPixel(10 + (uint8_t)(80.0f + w), 53 - (uint8_t)w);
-                    }
+					// 1. Generate Fake DMA Arrays with Phase Shift and Noise
+					for (int n = 0; n < NUM_SAMPLES; n++) {
+						float time = (float)n / sample_rate;
 
-                    OLED_UpdateScreen(); // Blast drawing to screen
+						// Voltage wave (Amplitude 15mV, 0 phase shift)
+						float clean_v = 0.015f * sinf(2.0f * 3.14159f * sim_freq * time);
 
-                    // Overlay Text Labels (Direct to OLED RAM)
-                    OLED_SetCursor(12, 0);  OLED_PrintString("-Z''");
-                    OLED_SetCursor(115, 6); OLED_PrintString("Z'");
+						// Current wave (Amplitude 1.0A, Phase shifted by 45 degrees / 0.785 rads)
+						float clean_i = 1.0f * sinf(2.0f * 3.14159f * sim_freq * time - 0.785f);
 
-                    // Align the numbers perfectly under the tick marks on Page 7
-                    OLED_SetCursor(44, 7);  OLED_PrintString("20");
-                    OLED_SetCursor(84, 7);  OLED_PrintString("40");
+						// Inject random ADC quantization noise (+/- 2mV)
+						float noise = ((float)(rand() % 400) / 100000.0f) - 0.002f;
 
-                } else {
-                    // --- PAGE 2: THE ENUMERATION ---
-                    // Simulated exact values based on our math model above
-                    OLED_DrawNyquistResults(25.0f, 15.0f);
-                }
+						v_samples[n] = clean_v + noise;
+						i_samples[n] = clean_i + noise;
+					}
 
-                ui_needs_update = 0;
-                break;
+					// 2. Run the Goertzel Filter!
+					float v_real, v_imag, i_real, i_imag;
+					Goertzel_Filter(v_samples, NUM_SAMPLES, sim_freq, sample_rate, &v_real, &v_imag);
+					Goertzel_Filter(i_samples, NUM_SAMPLES, sim_freq, sample_rate, &i_real, &i_imag);
+
+					// 3. Calculate Complex Impedance: Z = V / I
+					// Math formula for complex division: (a+bi)/(c+di)
+					float denominator = (i_real * i_real) + (i_imag * i_imag);
+					float z_real = ((v_real * i_real) + (v_imag * i_imag)) / denominator;
+					float z_imag = ((v_imag * i_real) - (v_real * i_imag)) / denominator;
+
+					// Convert mathematically calculated Ohms to milliOhms for display
+					float calc_rs = z_real * 1000.0f;
+					float calc_rct = -z_imag * 1000.0f; // Nyquist inverts the imaginary axis
+
+					// 4. Update the screen with the calculated math
+					OLED_Clear();
+					OLED_SetCursor(0, 3);
+					OLED_PrintString("DSP Calculation:");
+
+					char buf[20];
+					sprintf(buf, "Z':  %d mOhm", (int)calc_rs);
+					OLED_SetCursor(0, 5);
+					OLED_PrintString(buf);
+
+					sprintf(buf, "-Z'': %d mOhm", (int)calc_rct);
+					OLED_SetCursor(0, 7);
+					OLED_PrintString(buf);
+
+					// Put the CPU to sleep so you can read the result
+					while (current_state == STATE_NYQUIST) {
+						__WFI();
+					}
+
+				} else {
+					OLED_DrawNyquistResults(25.0f, 15.0f);
+				}
+
+				ui_needs_update = 0;
+				break;
         }
     }
 }

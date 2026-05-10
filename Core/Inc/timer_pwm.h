@@ -5,8 +5,8 @@
  *      Author: Ozome
  */
 
-#ifndef INC_TIMER_PWM_H_
-#define INC_TIMER_PWM_H_
+#ifndef TIMER_PWM_H
+#define TIMER_PWM_H
 
 #include "stm32f4xx.h"
 
@@ -15,4 +15,8 @@ void MOSFET_Timer1_Start(void);
 void MOSFET_Timer1_Stop(void);
 void MOSFET_Timer1_SetDutyCycle(uint16_t duty);
 
-#endif /* INC_TIMER_PWM_H_ */
+// --- NEW SPWM FUNCTIONS ---
+void SPWM_Start_Frequency(float target_hz);
+void SPWM_Stop(void);
+
+#endif /* TIMER_PWM_H */

@@ -21,4 +21,7 @@
 float Calculate_Battery_Voltage(uint16_t raw_adc);
 float Calculate_Load_Current(uint16_t raw_adc);
 
+// --- NEW EIS DSP ENGINE ---
+void Goertzel_Filter(float* samples, int N, float target_freq, float sample_rate, float* real_out, float* imag_out);
+
 #endif /* DSP_MATH_H */
