@@ -21,6 +21,7 @@ void OLED_UpdateScreen(void);
 void OLED_DrawPixel(uint8_t x, uint8_t y);
 void OLED_DrawLine(uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1);
 void OLED_DrawNyquistGrid(void);
+void OLED_DrawMenu(uint8_t cursor_pos);
 
 // (Keep your existing UpdateStatus and UpdateEIS functions here)
 void OLED_UpdateStatus(char* status);
