@@ -28,5 +28,7 @@ void OLED_UpdateStatus(char* status);
 void OLED_UpdateEIS(float v_rest, float v_load, float i_load, float impedance);
 
 void OLED_DrawNyquistResults(float rs, float rct);
+void OLED_DrawFreqSetup(uint8_t* digits, uint8_t digit_cursor, uint8_t is_edit_mode, uint8_t menu_cursor, uint8_t show_digit_cursor);
+void OLED_DrawSquareResults(float z1_rs, float z1_rct, float z3_rs, float z3_rct, float z5_rs, float z5_rct);
 
 #endif /* OLED_UI_H */

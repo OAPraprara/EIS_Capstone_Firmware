@@ -32,9 +32,13 @@ void Buttons_Init(void) {
     // 5. Unmask (Enable) EXTI lines 8, 12, and 15
     EXTI->IMR |= (EXTI_IMR_IM8 | EXTI_IMR_IM12 | EXTI_IMR_IM15);
 
-    // 6. Set Trigger to Falling Edge
-    EXTI->FTSR |= (EXTI_FTSR_TR8 | EXTI_FTSR_TR12 | EXTI_FTSR_TR15);
+    // 6. Set Trigger Edges
+	// PB12 (Up) and PB15 (Down) only trigger when pressed (Falling Edge)
+	EXTI->FTSR |= (EXTI_FTSR_TR8 | EXTI_FTSR_TR12 | EXTI_FTSR_TR15);
 
+	// NEW: PB8 (Select) also triggers when released (Rising Edge)
+	// This allows us to calculate how long it was held!
+	EXTI->RTSR |= (EXTI_RTSR_TR8);
     // 7. Enable Both Interrupts in the NVIC!
     NVIC_EnableIRQ(EXTI9_5_IRQn);    // For PB8 (Select)
     NVIC_SetPriority(EXTI9_5_IRQn, 2);

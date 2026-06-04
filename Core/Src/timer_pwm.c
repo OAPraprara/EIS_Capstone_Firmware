@@ -57,6 +57,9 @@ void MOSFET_Timer1_Init(void) {
     TIM1->DIER |= TIM_DIER_UIE; // Update Interrupt Enable
     NVIC_EnableIRQ(TIM1_UP_TIM10_IRQn);
     NVIC_SetPriority(TIM1_UP_TIM10_IRQn, 1); // High priority!
+
+    // Lock the gate shut the exact millisecond the device boots!
+    MOSFET_Timer1_Stop();
 }
 
 // --- THE DDS ENGINE (Runs 100,000 times per second!) ---
@@ -81,13 +84,27 @@ void MOSFET_Timer1_SetDutyCycle(uint16_t duty) {
     TIM1->CCR1 = duty;
 }
 
-void MOSFET_Timer1_Start(void) {
-    TIM1->CR1 |= TIM_CR1_CEN;
-}
+
 
 void MOSFET_Timer1_Stop(void) {
-    TIM1->CR1 &= ~TIM_CR1_CEN;
-    TIM1->CCR1 = 0; // Force OFF
+    TIM1->CR1 &= ~TIM_CR1_CEN; // Stop the timer
+
+    // --- THE INVERTED GATE DRIVER FIX ---
+    // Disconnect PA8 from the Timer and make it a standard Output (01)
+    GPIOA->MODER &= ~GPIO_MODER_MODER8;
+    GPIOA->MODER |= GPIO_MODER_MODER8_0;
+
+    // Force PA8 HIGH (3.3V) to turn the gate driver OFF!
+    GPIOA->BSRR = GPIO_BSRR_BS8;
+}
+
+void MOSFET_Timer1_Start(void) {
+    // --- THE INVERTED GATE DRIVER FIX ---
+    // Reconnect PA8 back to the Timer's Alternate Function (10)
+    GPIOA->MODER &= ~GPIO_MODER_MODER8;
+    GPIOA->MODER |= GPIO_MODER_MODER8_1;
+
+    TIM1->CR1 |= TIM_CR1_CEN; // Start the timer
 }
 
 // --- NEW: START A SPECIFIC SINE WAVE FREQUENCY ---

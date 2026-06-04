@@ -69,7 +69,9 @@ void OLED_Clear(void) {
             I2C1->CR1 |= I2C_CR1_START;
             while(!(I2C1->SR1 & I2C_SR1_SB));
             I2C1->DR = 0x78;
-            while(!(I2C1->SR1 & I2C_SR1_ADDR)); (void)I2C1->SR1; (void)I2C1->SR2;
+            while(!(I2C1->SR1 & I2C_SR1_ADDR));
+            (void)I2C1->SR1;
+            (void)I2C1->SR2;
             I2C1->DR = 0x40; // Data mode!
             while(!(I2C1->SR1 & I2C_SR1_TXE));
             I2C1->DR = 0x00; // Blank pixel
@@ -87,7 +89,9 @@ void OLED_PrintChar(char c) {
     I2C1->CR1 |= I2C_CR1_START;
     while(!(I2C1->SR1 & I2C_SR1_SB));
     I2C1->DR = 0x78;
-    while(!(I2C1->SR1 & I2C_SR1_ADDR)); (void)I2C1->SR1; (void)I2C1->SR2;
+    while(!(I2C1->SR1 & I2C_SR1_ADDR));
+    (void)I2C1->SR1;
+    (void)I2C1->SR2;
 
     I2C1->DR = 0x40; // Data mode
     while(!(I2C1->SR1 & I2C_SR1_TXE));
@@ -153,7 +157,9 @@ void OLED_DrawBatteryIcon(uint8_t x, uint8_t page) {
     I2C1->CR1 |= I2C_CR1_START;
     while(!(I2C1->SR1 & I2C_SR1_SB));
     I2C1->DR = 0x78;
-    while(!(I2C1->SR1 & I2C_SR1_ADDR)); (void)I2C1->SR1; (void)I2C1->SR2;
+    while(!(I2C1->SR1 & I2C_SR1_ADDR));
+    (void)I2C1->SR1;
+    (void)I2C1->SR2;
 
     I2C1->DR = 0x40; // Data Mode
     while(!(I2C1->SR1 & I2C_SR1_TXE));
@@ -211,8 +217,8 @@ void OLED_DrawMenu(uint8_t cursor_pos) {
 
     // Option 0: DCIR Test
     OLED_SetCursor(0, 3);
-    if (cursor_pos == 0) OLED_PrintString(" > 1. DCIR Test");
-    else                 OLED_PrintString("   1. DCIR Test");
+    if (cursor_pos == 0) OLED_PrintString(" > 1. Sq-Wave Test");
+    else                 OLED_PrintString("   1. Sq-Wave Test");
 
     // Option 1: Nyquist Sweep
     OLED_SetCursor(0, 5);
@@ -240,7 +246,9 @@ void OLED_UpdateScreen(void) {
         I2C1->CR1 |= I2C_CR1_START;
         while(!(I2C1->SR1 & I2C_SR1_SB));
         I2C1->DR = 0x78;
-        while(!(I2C1->SR1 & I2C_SR1_ADDR)); (void)I2C1->SR1; (void)I2C1->SR2;
+        while(!(I2C1->SR1 & I2C_SR1_ADDR));
+        (void)I2C1->SR1;
+        (void)I2C1->SR2;
 
         I2C1->DR = 0x40; // Data Mode
         while(!(I2C1->SR1 & I2C_SR1_TXE));
@@ -321,4 +329,68 @@ void OLED_DrawNyquistResults(float rs, float rct) {
     // Navigation Hint
     OLED_SetCursor(0, 7);
     OLED_PrintString("[UP] Graph [SEL] Exit");
+}
+
+void OLED_DrawFreqSetup(uint8_t* digits, uint8_t digit_cursor, uint8_t is_edit_mode, uint8_t menu_cursor, uint8_t show_digit_cursor) {
+    // NO OLED_Clear() HERE! This prevents the terrible full-screen flashing.
+
+    OLED_SetCursor(0, 0);
+    OLED_PrintString("== SET FREQUENCY ==");
+
+    // Determine what character to show for each digit.
+    // If it's the active digit AND it's in the "off" phase of the blink, print a space ' '.
+    char d0 = (is_edit_mode && digit_cursor == 0 && !show_digit_cursor) ? ' ' : digits[0] + '0';
+    char d1 = (is_edit_mode && digit_cursor == 1 && !show_digit_cursor) ? ' ' : digits[1] + '0';
+    char d2 = (is_edit_mode && digit_cursor == 2 && !show_digit_cursor) ? ' ' : digits[2] + '0';
+    char d3 = (is_edit_mode && digit_cursor == 3 && !show_digit_cursor) ? ' ' : digits[3] + '0';
+
+    char buf[30];
+    sprintf(buf, "    %c  %c  %c  %c  Hz", d0, d1, d2, d3);
+
+    OLED_SetCursor(0, 2);
+    OLED_PrintString("                  "); // Erase row 2 just in case there's leftover menu text
+
+    OLED_SetCursor(0, 3);
+    OLED_PrintString(buf);
+
+    OLED_SetCursor(0, 4);
+    if (is_edit_mode) {
+        // We pad with spaces to instantly erase the previous cursor position!
+        if(digit_cursor == 0) OLED_PrintString("    ^             ");
+        if(digit_cursor == 1) OLED_PrintString("       ^          ");
+        if(digit_cursor == 2) OLED_PrintString("          ^       ");
+        if(digit_cursor == 3) OLED_PrintString("             ^    ");
+    } else {
+        OLED_PrintString("                  "); // Erase the cursor entirely in Locked mode
+    }
+
+    OLED_SetCursor(0, 6);
+    if (is_edit_mode) {
+        OLED_PrintString(" HOLD SEL TO SAVE ");
+    } else {
+        if (menu_cursor == 0) OLED_PrintString(" > Run Test   Back");
+        else                  OLED_PrintString("   Run Test > Back");
+    }
+}
+
+void OLED_DrawSquareResults(float z1_rs, float z1_rct, float z3_rs, float z3_rct, float z5_rs, float z5_rct) {
+    OLED_Clear();
+    OLED_SetCursor(0, 0);
+    OLED_PrintString("= HARMONIC RESULTS =");
+
+    // Increased buffer size to safely hold the extra decimal characters
+    char buf[40];
+
+    // Using %.3f to display exactly 3 decimal places
+    sprintf(buf, "f1: %.3f - j%.3f", z1_rs, z1_rct);
+    OLED_SetCursor(0, 2);
+    OLED_PrintString(buf);
+
+    sprintf(buf, "f3: %.3f - j%.3f", z3_rs, z3_rct);
+    OLED_SetCursor(0, 4);
+    OLED_PrintString(buf);
+
+    sprintf(buf, "f5: %.3f - j%.3f", z5_rs, z5_rct);
+    OLED_SetCursor(0, 6);
+    OLED_PrintString(buf);
 }
